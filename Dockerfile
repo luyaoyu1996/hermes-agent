@@ -24,6 +24,9 @@ COPY --chmod=0755 --from=uv_source /usr/local/bin/uv /usr/local/bin/uvx /usr/loc
 COPY . /opt/hermes
 WORKDIR /opt/hermes
 
+# Use China npm mirror for faster builds behind GFW
+RUN npm config set registry https://registry.npmmirror.com
+
 # Install Node dependencies and Playwright as root (--with-deps needs apt)
 RUN npm install --prefer-offline --no-audit && \
     npx playwright install --with-deps chromium --only-shell && \
@@ -36,7 +39,7 @@ RUN chown -R hermes:hermes /opt/hermes
 USER hermes
 
 RUN uv venv && \
-    uv pip install --no-cache-dir -e ".[all]"
+    uv pip install --no-cache-dir -e ".[all]" --index-url https://pypi.tuna.tsinghua.edu.cn/simple
 
 USER root
 RUN chmod +x /opt/hermes/docker/entrypoint.sh
