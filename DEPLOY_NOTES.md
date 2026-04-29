@@ -34,8 +34,10 @@ TERMINAL_TIMEOUT=60
 **~/.hermes/config.yaml**
 ```yaml
 model:
-  provider: alibaba
-  default: qwen3.5-plus
+  provider: custom
+  model: doubao-seed-2.0-pro
+  base_url: https://ark.cn-beijing.volces.com/api/coding/v3
+  api_key: d97a4345-e9f7-4336-8914-fa52ddb7be98
 
 terminal:
   backend: local
@@ -51,6 +53,7 @@ terminal:
 - 启动命令：`hermes gateway`
 - 后台运行：`nohup hermes gateway > /var/log/hermes-gateway.log 2>&1 &`
 - 支持：私聊、群聊、图片/文件/语音、Markdown 渲染、自动重连
+- 图片问题修复：已修改 [gateway/platforms/base.py](gateway/platforms/base.py)，取消 markdown 图片 URL 白名单限制；企业微信会尝试把回复中的 `![...](https://...)` 作为原生图片发送，失败时自动回退为文本链接
 
 ## 开发工作流
 

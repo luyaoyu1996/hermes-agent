@@ -383,12 +383,20 @@ class WeComAdapter(BasePlatformAdapter):
             return
 
         if cmd in CALLBACK_COMMANDS:
+            body = payload.get("body") if isinstance(payload.get("body"), dict) else {}
+            logger.info(
+                "[%s] WeCom callback received: cmd=%s msgtype=%s body_keys=%s",
+                self.name,
+                cmd,
+                str(body.get("msgtype") or "").lower(),
+                sorted(body.keys()) if body else [],
+            )
             await self._on_message(payload)
             return
         if cmd in {APP_CMD_PING, APP_CMD_EVENT_CALLBACK}:
             return
 
-        logger.debug("[%s] Ignoring websocket payload: %s", self.name, cmd or payload)
+        logger.info("[%s] Ignoring websocket payload: cmd=%s keys=%s", self.name, cmd or "", sorted(payload.keys()))
 
     def _fail_pending_responses(self, exc: Exception) -> None:
         """Fail all outstanding request futures."""
@@ -501,11 +509,28 @@ class WeComAdapter(BasePlatformAdapter):
         message_type = self._derive_message_type(body, text, media_types)
         has_reply_context = bool(reply_text and (text or media_urls))
 
+        msgtype = str(body.get("msgtype") or "").lower()
+        if msgtype and msgtype != "text":
+            logger.info(
+                "[%s] Inbound WeCom payload: msgtype=%s body_keys=%s media_count=%d media_types=%s text_len=%d",
+                self.name,
+                msgtype,
+                sorted(body.keys()),
+                len(media_urls),
+                media_types,
+                len(text or ""),
+            )
+
         if not text and reply_text and not media_urls:
             text = reply_text
 
         if not text and not media_urls:
-            logger.debug("[%s] Empty WeCom message skipped", self.name)
+            logger.info(
+                "[%s] Empty WeCom message skipped: msgtype=%s body_keys=%s",
+                self.name,
+                msgtype,
+                sorted(body.keys()),
+            )
             return
 
         source = self.build_source(
