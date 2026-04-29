@@ -697,6 +697,9 @@ class WeComAdapter(BasePlatformAdapter):
         else:
             if isinstance(body.get("image"), dict):
                 refs.append(("image", body["image"]))
+                logger.info("[%s] WeCom image ref: %s", "Wecom", {k: (v[:80] if isinstance(v, str) else v) for k, v in body["image"].items()})
+            elif body.get("image") is not None:
+                logger.info("[%s] WeCom image field is not dict: type=%s value=%s", "Wecom", type(body.get("image")).__name__, str(body.get("image"))[:200])
             if msgtype == "file" and isinstance(body.get("file"), dict):
                 refs.append(("file", body["file"]))
             # Handle appmsg (WeCom AI Bot attachments with PDF/Word/Excel)
