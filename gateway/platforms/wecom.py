@@ -753,7 +753,7 @@ class WeComAdapter(BasePlatformAdapter):
         try:
             raw, headers = await self._download_remote_bytes(url, max_bytes=ABSOLUTE_MAX_BYTES)
         except Exception as exc:
-            logger.debug("[%s] Failed to download %s from %s: %s", self.name, kind, url, exc)
+            logger.warning("[%s] Failed to download %s from %s: %s", self.name, kind, url, exc)
             return None
 
         aes_key = str(media.get("aeskey") or "").strip()
@@ -761,7 +761,7 @@ class WeComAdapter(BasePlatformAdapter):
             try:
                 raw = self._decrypt_file_bytes(raw, aes_key)
             except Exception as exc:
-                logger.debug("[%s] Failed to decrypt %s from %s: %s", self.name, kind, url, exc)
+                logger.warning("[%s] Failed to decrypt %s from %s: %s", self.name, kind, url, exc)
                 return None
 
         content_type = str(headers.get("content-type") or "").split(";", 1)[0].strip() or "application/octet-stream"
