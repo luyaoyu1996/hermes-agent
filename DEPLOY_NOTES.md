@@ -176,6 +176,58 @@ git pull origin main
 - 运行时 skills 路径：`~/.hermes/skills/`（可直接在服务器创建，不走 git）
 - 推荐走 git 流程，便于版本管理和回滚
 
+## 个人微信（Weixin）接入
+
+### 扫码登录（首次或 token 过期后重新执行）
+
+```bash
+/opt/hermes-agent/venv/bin/python -c "
+import asyncio, sys
+sys.path.insert(0, '/opt/hermes-agent')
+from gateway.platforms.weixin import qr_login
+result = asyncio.run(qr_login('/root/.hermes'))
+print('Result:', result)
+"
+```
+
+扫码成功后把 `account_id` 和 `token` 写入 `~/.hermes/.env`：
+
+```bash
+cat >> ~/.hermes/.env << 'EOF'
+
+# Weixin Personal Account
+WEIXIN_ACCOUNT_ID=<扫码返回的 account_id>
+WEIXIN_TOKEN=<扫码返回的 token>
+WEIXIN_DM_POLICY=open
+EOF
+```
+
+### 启用 weixin 平台
+
+```bash
+cat > ~/.hermes/gateway.yaml << 'EOF'
+platforms:
+  weixin:
+    enabled: true
+EOF
+```
+
+重启 gateway 后日志应出现 `weixin connected`。
+
+### 付费用户白名单（收费后启用）
+
+改 `WEIXIN_DM_POLICY=allowlist`，并追加：
+
+```bash
+WEIXIN_ALLOWED_USERS=微信ID1,微信ID2
+```
+
+用户微信 ID 可从 gateway 日志里的 `inbound from=` 字段获取。
+
+### Token 过期说明
+
+iLink token 有效期未知，过期后 gateway 日志会出现 `Session expired`，重新执行扫码脚本即可。
+
 ## 从 OpenClaw 迁移
 
 - 服务器上原有 OpenClaw 部署，配置在 `~/.openclaw/`

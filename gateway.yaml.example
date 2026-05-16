@@ -1,0 +1,19 @@
+# Hermes Gateway Platform Configuration
+# Copy this file to ~/.hermes/gateway.yaml on the server
+# DO NOT commit gateway.yaml directly (contains no secrets, but is runtime config)
+
+platforms:
+  # Enterprise WeChat (WeCom) - configured via .env
+  # WECOM_BOT_ID, WECOM_SECRET, WECOM_DM_POLICY
+
+  # Personal WeChat (Weixin iLink Bot)
+  # To enable:
+  #   1. Run the QR login script on the server to get token
+  #   2. Add WEIXIN_ACCOUNT_ID and WEIXIN_TOKEN to ~/.hermes/.env
+  #   3. Uncomment the block below
+  #
+  # weixin:
+  #   enabled: true
+  #   extra:
+  #     dm_policy: open          # open | allowlist
+  #     allow_from: ""           # comma-separated WeChat user IDs (for allowlist mode)
