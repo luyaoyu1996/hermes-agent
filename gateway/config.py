@@ -226,12 +226,12 @@ class GatewayConfig:
     Manages all platform connections, session policies, and delivery settings.
     """
     # Platform configurations
-    platforms: Dict[Platform, PlatformConfig] = field(default_factory=dict)
+    platforms: Dict[str, PlatformConfig] = field(default_factory=dict)
     
     # Session reset policies by type
     default_reset_policy: SessionResetPolicy = field(default_factory=SessionResetPolicy)
     reset_by_type: Dict[str, SessionResetPolicy] = field(default_factory=dict)
-    reset_by_platform: Dict[Platform, SessionResetPolicy] = field(default_factory=dict)
+    reset_by_platform: Dict[str, SessionResetPolicy] = field(default_factory=dict)
     
     # Reset trigger commands
     reset_triggers: List[str] = field(default_factory=lambda: ["/new", "/reset"])
@@ -261,9 +261,18 @@ class GatewayConfig:
     def get_connected_platforms(self) -> List[Platform]:
         """Return list of platforms that are enabled and configured."""
         connected = []
-        for platform, config in self.platforms.items():
+        for platform_key, config in self.platforms.items():
             if not config.enabled:
                 continue
+            # Resolve the base platform type from the key (e.g. "weixin_user1" → Platform.WEIXIN)
+            base_name = platform_key.split("_")[0] if "_" in platform_key else platform_key
+            try:
+                platform = Platform(base_name)
+            except ValueError:
+                try:
+                    platform = Platform(platform_key)
+                except ValueError:
+                    continue
             # Weixin requires both a token and an account_id
             if platform == Platform.WEIXIN:
                 if config.extra.get("account_id") and (config.token or config.extra.get("token")):
@@ -311,7 +320,8 @@ class GatewayConfig:
     
     def get_home_channel(self, platform: Platform) -> Optional[HomeChannel]:
         """Get the home channel for a platform."""
-        config = self.platforms.get(platform)
+        # Check exact key first, then platform value
+        config = self.platforms.get(platform.value)
         if config:
             return config.home_channel
         return None
@@ -327,8 +337,8 @@ class GatewayConfig:
         Priority: platform override > type override > default
         """
         # Platform-specific override takes precedence
-        if platform and platform in self.reset_by_platform:
-            return self.reset_by_platform[platform]
+        if platform and platform.value in self.reset_by_platform:
+            return self.reset_by_platform[platform.value]
         
         # Type-specific override (dm, group, thread)
         if session_type and session_type in self.reset_by_type:
@@ -339,14 +349,14 @@ class GatewayConfig:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "platforms": {
-                p.value: c.to_dict() for p, c in self.platforms.items()
+                k: c.to_dict() for k, c in self.platforms.items()
             },
             "default_reset_policy": self.default_reset_policy.to_dict(),
             "reset_by_type": {
                 k: v.to_dict() for k, v in self.reset_by_type.items()
             },
             "reset_by_platform": {
-                p.value: v.to_dict() for p, v in self.reset_by_platform.items()
+                k: v.to_dict() for k, v in self.reset_by_platform.items()
             },
             "reset_triggers": self.reset_triggers,
             "quick_commands": self.quick_commands,
@@ -364,8 +374,15 @@ class GatewayConfig:
         platforms = {}
         for platform_name, platform_data in data.get("platforms", {}).items():
             try:
-                platform = Platform(platform_name)
-                platforms[platform] = PlatformConfig.from_dict(platform_data)
+                # Support suffixed keys like "weixin_user1" → platform type "weixin"
+                base_name = platform_name.split("_")[0] if "_" in platform_name else platform_name
+                try:
+                    Platform(platform_name)  # exact match first
+                    key = platform_name
+                except ValueError:
+                    Platform(base_name)  # validate base name is a known platform
+                    key = platform_name
+                platforms[key] = PlatformConfig.from_dict(platform_data)
             except ValueError:
                 pass  # Skip unknown platforms
         
@@ -754,29 +771,29 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     # Telegram
     telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if telegram_token:
-        if Platform.TELEGRAM not in config.platforms:
-            config.platforms[Platform.TELEGRAM] = PlatformConfig()
-        config.platforms[Platform.TELEGRAM].enabled = True
-        config.platforms[Platform.TELEGRAM].token = telegram_token
+        if Platform.TELEGRAM.value not in config.platforms:
+            config.platforms[Platform.TELEGRAM.value] = PlatformConfig()
+        config.platforms[Platform.TELEGRAM.value].enabled = True
+        config.platforms[Platform.TELEGRAM.value].token = telegram_token
     
     # Reply threading mode for Telegram (off/first/all)
     telegram_reply_mode = os.getenv("TELEGRAM_REPLY_TO_MODE", "").lower()
     if telegram_reply_mode in ("off", "first", "all"):
-        if Platform.TELEGRAM not in config.platforms:
-            config.platforms[Platform.TELEGRAM] = PlatformConfig()
-        config.platforms[Platform.TELEGRAM].reply_to_mode = telegram_reply_mode
+        if Platform.TELEGRAM.value not in config.platforms:
+            config.platforms[Platform.TELEGRAM.value] = PlatformConfig()
+        config.platforms[Platform.TELEGRAM.value].reply_to_mode = telegram_reply_mode
     
     telegram_fallback_ips = os.getenv("TELEGRAM_FALLBACK_IPS", "")
     if telegram_fallback_ips:
-        if Platform.TELEGRAM not in config.platforms:
-            config.platforms[Platform.TELEGRAM] = PlatformConfig()
-        config.platforms[Platform.TELEGRAM].extra["fallback_ips"] = [
+        if Platform.TELEGRAM.value not in config.platforms:
+            config.platforms[Platform.TELEGRAM.value] = PlatformConfig()
+        config.platforms[Platform.TELEGRAM.value].extra["fallback_ips"] = [
             ip.strip() for ip in telegram_fallback_ips.split(",") if ip.strip()
         ]
 
     telegram_home = os.getenv("TELEGRAM_HOME_CHANNEL")
-    if telegram_home and Platform.TELEGRAM in config.platforms:
-        config.platforms[Platform.TELEGRAM].home_channel = HomeChannel(
+    if telegram_home and Platform.TELEGRAM.value in config.platforms:
+        config.platforms[Platform.TELEGRAM.value].home_channel = HomeChannel(
             platform=Platform.TELEGRAM,
             chat_id=telegram_home,
             name=os.getenv("TELEGRAM_HOME_CHANNEL_NAME", "Home"),
@@ -785,14 +802,14 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     # Discord
     discord_token = os.getenv("DISCORD_BOT_TOKEN")
     if discord_token:
-        if Platform.DISCORD not in config.platforms:
-            config.platforms[Platform.DISCORD] = PlatformConfig()
-        config.platforms[Platform.DISCORD].enabled = True
-        config.platforms[Platform.DISCORD].token = discord_token
+        if Platform.DISCORD.value not in config.platforms:
+            config.platforms[Platform.DISCORD.value] = PlatformConfig()
+        config.platforms[Platform.DISCORD.value].enabled = True
+        config.platforms[Platform.DISCORD.value].token = discord_token
     
     discord_home = os.getenv("DISCORD_HOME_CHANNEL")
-    if discord_home and Platform.DISCORD in config.platforms:
-        config.platforms[Platform.DISCORD].home_channel = HomeChannel(
+    if discord_home and Platform.DISCORD.value in config.platforms:
+        config.platforms[Platform.DISCORD.value].home_channel = HomeChannel(
             platform=Platform.DISCORD,
             chat_id=discord_home,
             name=os.getenv("DISCORD_HOME_CHANNEL_NAME", "Home"),
@@ -801,27 +818,27 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     # Reply threading mode for Discord (off/first/all)
     discord_reply_mode = os.getenv("DISCORD_REPLY_TO_MODE", "").lower()
     if discord_reply_mode in ("off", "first", "all"):
-        if Platform.DISCORD not in config.platforms:
-            config.platforms[Platform.DISCORD] = PlatformConfig()
-        config.platforms[Platform.DISCORD].reply_to_mode = discord_reply_mode
+        if Platform.DISCORD.value not in config.platforms:
+            config.platforms[Platform.DISCORD.value] = PlatformConfig()
+        config.platforms[Platform.DISCORD.value].reply_to_mode = discord_reply_mode
     
     # WhatsApp (typically uses different auth mechanism)
     whatsapp_enabled = os.getenv("WHATSAPP_ENABLED", "").lower() in ("true", "1", "yes")
     if whatsapp_enabled:
-        if Platform.WHATSAPP not in config.platforms:
-            config.platforms[Platform.WHATSAPP] = PlatformConfig()
-        config.platforms[Platform.WHATSAPP].enabled = True
+        if Platform.WHATSAPP.value not in config.platforms:
+            config.platforms[Platform.WHATSAPP.value] = PlatformConfig()
+        config.platforms[Platform.WHATSAPP.value].enabled = True
     
     # Slack
     slack_token = os.getenv("SLACK_BOT_TOKEN")
     if slack_token:
-        if Platform.SLACK not in config.platforms:
-            config.platforms[Platform.SLACK] = PlatformConfig()
-        config.platforms[Platform.SLACK].enabled = True
-        config.platforms[Platform.SLACK].token = slack_token
+        if Platform.SLACK.value not in config.platforms:
+            config.platforms[Platform.SLACK.value] = PlatformConfig()
+        config.platforms[Platform.SLACK.value].enabled = True
+        config.platforms[Platform.SLACK.value].token = slack_token
     slack_home = os.getenv("SLACK_HOME_CHANNEL")
-    if slack_home and Platform.SLACK in config.platforms:
-        config.platforms[Platform.SLACK].home_channel = HomeChannel(
+    if slack_home and Platform.SLACK.value in config.platforms:
+        config.platforms[Platform.SLACK.value].home_channel = HomeChannel(
             platform=Platform.SLACK,
             chat_id=slack_home,
             name=os.getenv("SLACK_HOME_CHANNEL_NAME", ""),
@@ -831,17 +848,17 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     signal_url = os.getenv("SIGNAL_HTTP_URL")
     signal_account = os.getenv("SIGNAL_ACCOUNT")
     if signal_url and signal_account:
-        if Platform.SIGNAL not in config.platforms:
-            config.platforms[Platform.SIGNAL] = PlatformConfig()
-        config.platforms[Platform.SIGNAL].enabled = True
-        config.platforms[Platform.SIGNAL].extra.update({
+        if Platform.SIGNAL.value not in config.platforms:
+            config.platforms[Platform.SIGNAL.value] = PlatformConfig()
+        config.platforms[Platform.SIGNAL.value].enabled = True
+        config.platforms[Platform.SIGNAL.value].extra.update({
             "http_url": signal_url,
             "account": signal_account,
             "ignore_stories": os.getenv("SIGNAL_IGNORE_STORIES", "true").lower() in ("true", "1", "yes"),
         })
     signal_home = os.getenv("SIGNAL_HOME_CHANNEL")
-    if signal_home and Platform.SIGNAL in config.platforms:
-        config.platforms[Platform.SIGNAL].home_channel = HomeChannel(
+    if signal_home and Platform.SIGNAL.value in config.platforms:
+        config.platforms[Platform.SIGNAL.value].home_channel = HomeChannel(
             platform=Platform.SIGNAL,
             chat_id=signal_home,
             name=os.getenv("SIGNAL_HOME_CHANNEL_NAME", "Home"),
@@ -853,14 +870,14 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         mattermost_url = os.getenv("MATTERMOST_URL", "")
         if not mattermost_url:
             logger.warning("MATTERMOST_TOKEN set but MATTERMOST_URL is missing")
-        if Platform.MATTERMOST not in config.platforms:
-            config.platforms[Platform.MATTERMOST] = PlatformConfig()
-        config.platforms[Platform.MATTERMOST].enabled = True
-        config.platforms[Platform.MATTERMOST].token = mattermost_token
-        config.platforms[Platform.MATTERMOST].extra["url"] = mattermost_url
+        if Platform.MATTERMOST.value not in config.platforms:
+            config.platforms[Platform.MATTERMOST.value] = PlatformConfig()
+        config.platforms[Platform.MATTERMOST.value].enabled = True
+        config.platforms[Platform.MATTERMOST.value].token = mattermost_token
+        config.platforms[Platform.MATTERMOST.value].extra["url"] = mattermost_url
     mattermost_home = os.getenv("MATTERMOST_HOME_CHANNEL")
-    if mattermost_home and Platform.MATTERMOST in config.platforms:
-        config.platforms[Platform.MATTERMOST].home_channel = HomeChannel(
+    if mattermost_home and Platform.MATTERMOST.value in config.platforms:
+        config.platforms[Platform.MATTERMOST.value].home_channel = HomeChannel(
             platform=Platform.MATTERMOST,
             chat_id=mattermost_home,
             name=os.getenv("MATTERMOST_HOME_CHANNEL_NAME", "Home"),
@@ -872,26 +889,26 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     if matrix_token or os.getenv("MATRIX_PASSWORD"):
         if not matrix_homeserver:
             logger.warning("MATRIX_ACCESS_TOKEN/MATRIX_PASSWORD set but MATRIX_HOMESERVER is missing")
-        if Platform.MATRIX not in config.platforms:
-            config.platforms[Platform.MATRIX] = PlatformConfig()
-        config.platforms[Platform.MATRIX].enabled = True
+        if Platform.MATRIX.value not in config.platforms:
+            config.platforms[Platform.MATRIX.value] = PlatformConfig()
+        config.platforms[Platform.MATRIX.value].enabled = True
         if matrix_token:
-            config.platforms[Platform.MATRIX].token = matrix_token
-        config.platforms[Platform.MATRIX].extra["homeserver"] = matrix_homeserver
+            config.platforms[Platform.MATRIX.value].token = matrix_token
+        config.platforms[Platform.MATRIX.value].extra["homeserver"] = matrix_homeserver
         matrix_user = os.getenv("MATRIX_USER_ID", "")
         if matrix_user:
-            config.platforms[Platform.MATRIX].extra["user_id"] = matrix_user
+            config.platforms[Platform.MATRIX.value].extra["user_id"] = matrix_user
         matrix_password = os.getenv("MATRIX_PASSWORD", "")
         if matrix_password:
-            config.platforms[Platform.MATRIX].extra["password"] = matrix_password
+            config.platforms[Platform.MATRIX.value].extra["password"] = matrix_password
         matrix_e2ee = os.getenv("MATRIX_ENCRYPTION", "").lower() in ("true", "1", "yes")
-        config.platforms[Platform.MATRIX].extra["encryption"] = matrix_e2ee
+        config.platforms[Platform.MATRIX.value].extra["encryption"] = matrix_e2ee
         matrix_device_id = os.getenv("MATRIX_DEVICE_ID", "")
         if matrix_device_id:
-            config.platforms[Platform.MATRIX].extra["device_id"] = matrix_device_id
+            config.platforms[Platform.MATRIX.value].extra["device_id"] = matrix_device_id
     matrix_home = os.getenv("MATRIX_HOME_ROOM")
-    if matrix_home and Platform.MATRIX in config.platforms:
-        config.platforms[Platform.MATRIX].home_channel = HomeChannel(
+    if matrix_home and Platform.MATRIX.value in config.platforms:
+        config.platforms[Platform.MATRIX.value].home_channel = HomeChannel(
             platform=Platform.MATRIX,
             chat_id=matrix_home,
             name=os.getenv("MATRIX_HOME_ROOM_NAME", "Home"),
@@ -900,13 +917,13 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     # Home Assistant
     hass_token = os.getenv("HASS_TOKEN")
     if hass_token:
-        if Platform.HOMEASSISTANT not in config.platforms:
-            config.platforms[Platform.HOMEASSISTANT] = PlatformConfig()
-        config.platforms[Platform.HOMEASSISTANT].enabled = True
-        config.platforms[Platform.HOMEASSISTANT].token = hass_token
+        if Platform.HOMEASSISTANT.value not in config.platforms:
+            config.platforms[Platform.HOMEASSISTANT.value] = PlatformConfig()
+        config.platforms[Platform.HOMEASSISTANT.value].enabled = True
+        config.platforms[Platform.HOMEASSISTANT.value].token = hass_token
         hass_url = os.getenv("HASS_URL")
         if hass_url:
-            config.platforms[Platform.HOMEASSISTANT].extra["url"] = hass_url
+            config.platforms[Platform.HOMEASSISTANT.value].extra["url"] = hass_url
 
     # Email
     email_addr = os.getenv("EMAIL_ADDRESS")
@@ -914,17 +931,17 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     email_imap = os.getenv("EMAIL_IMAP_HOST")
     email_smtp = os.getenv("EMAIL_SMTP_HOST")
     if all([email_addr, email_pwd, email_imap, email_smtp]):
-        if Platform.EMAIL not in config.platforms:
-            config.platforms[Platform.EMAIL] = PlatformConfig()
-        config.platforms[Platform.EMAIL].enabled = True
-        config.platforms[Platform.EMAIL].extra.update({
+        if Platform.EMAIL.value not in config.platforms:
+            config.platforms[Platform.EMAIL.value] = PlatformConfig()
+        config.platforms[Platform.EMAIL.value].enabled = True
+        config.platforms[Platform.EMAIL.value].extra.update({
             "address": email_addr,
             "imap_host": email_imap,
             "smtp_host": email_smtp,
         })
     email_home = os.getenv("EMAIL_HOME_ADDRESS")
-    if email_home and Platform.EMAIL in config.platforms:
-        config.platforms[Platform.EMAIL].home_channel = HomeChannel(
+    if email_home and Platform.EMAIL.value in config.platforms:
+        config.platforms[Platform.EMAIL.value].home_channel = HomeChannel(
             platform=Platform.EMAIL,
             chat_id=email_home,
             name=os.getenv("EMAIL_HOME_ADDRESS_NAME", "Home"),
@@ -933,13 +950,13 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     # SMS (Twilio)
     twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
     if twilio_sid:
-        if Platform.SMS not in config.platforms:
-            config.platforms[Platform.SMS] = PlatformConfig()
-        config.platforms[Platform.SMS].enabled = True
-        config.platforms[Platform.SMS].api_key = os.getenv("TWILIO_AUTH_TOKEN", "")
+        if Platform.SMS.value not in config.platforms:
+            config.platforms[Platform.SMS.value] = PlatformConfig()
+        config.platforms[Platform.SMS.value].enabled = True
+        config.platforms[Platform.SMS.value].api_key = os.getenv("TWILIO_AUTH_TOKEN", "")
     sms_home = os.getenv("SMS_HOME_CHANNEL")
-    if sms_home and Platform.SMS in config.platforms:
-        config.platforms[Platform.SMS].home_channel = HomeChannel(
+    if sms_home and Platform.SMS.value in config.platforms:
+        config.platforms[Platform.SMS.value].home_channel = HomeChannel(
             platform=Platform.SMS,
             chat_id=sms_home,
             name=os.getenv("SMS_HOME_CHANNEL_NAME", "Home"),
@@ -952,50 +969,50 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     api_server_port = os.getenv("API_SERVER_PORT")
     api_server_host = os.getenv("API_SERVER_HOST")
     if api_server_enabled or api_server_key:
-        if Platform.API_SERVER not in config.platforms:
-            config.platforms[Platform.API_SERVER] = PlatformConfig()
-        config.platforms[Platform.API_SERVER].enabled = True
+        if Platform.API_SERVER.value not in config.platforms:
+            config.platforms[Platform.API_SERVER.value] = PlatformConfig()
+        config.platforms[Platform.API_SERVER.value].enabled = True
         if api_server_key:
-            config.platforms[Platform.API_SERVER].extra["key"] = api_server_key
+            config.platforms[Platform.API_SERVER.value].extra["key"] = api_server_key
         if api_server_cors_origins:
             origins = [origin.strip() for origin in api_server_cors_origins.split(",") if origin.strip()]
             if origins:
-                config.platforms[Platform.API_SERVER].extra["cors_origins"] = origins
+                config.platforms[Platform.API_SERVER.value].extra["cors_origins"] = origins
         if api_server_port:
             try:
-                config.platforms[Platform.API_SERVER].extra["port"] = int(api_server_port)
+                config.platforms[Platform.API_SERVER.value].extra["port"] = int(api_server_port)
             except ValueError:
                 pass
         if api_server_host:
-            config.platforms[Platform.API_SERVER].extra["host"] = api_server_host
+            config.platforms[Platform.API_SERVER.value].extra["host"] = api_server_host
         api_server_model_name = os.getenv("API_SERVER_MODEL_NAME", "")
         if api_server_model_name:
-            config.platforms[Platform.API_SERVER].extra["model_name"] = api_server_model_name
+            config.platforms[Platform.API_SERVER.value].extra["model_name"] = api_server_model_name
 
     # Webhook platform
     webhook_enabled = os.getenv("WEBHOOK_ENABLED", "").lower() in ("true", "1", "yes")
     webhook_port = os.getenv("WEBHOOK_PORT")
     webhook_secret = os.getenv("WEBHOOK_SECRET", "")
     if webhook_enabled:
-        if Platform.WEBHOOK not in config.platforms:
-            config.platforms[Platform.WEBHOOK] = PlatformConfig()
-        config.platforms[Platform.WEBHOOK].enabled = True
+        if Platform.WEBHOOK.value not in config.platforms:
+            config.platforms[Platform.WEBHOOK.value] = PlatformConfig()
+        config.platforms[Platform.WEBHOOK.value].enabled = True
         if webhook_port:
             try:
-                config.platforms[Platform.WEBHOOK].extra["port"] = int(webhook_port)
+                config.platforms[Platform.WEBHOOK.value].extra["port"] = int(webhook_port)
             except ValueError:
                 pass
         if webhook_secret:
-            config.platforms[Platform.WEBHOOK].extra["secret"] = webhook_secret
+            config.platforms[Platform.WEBHOOK.value].extra["secret"] = webhook_secret
 
     # Feishu / Lark
     feishu_app_id = os.getenv("FEISHU_APP_ID")
     feishu_app_secret = os.getenv("FEISHU_APP_SECRET")
     if feishu_app_id and feishu_app_secret:
-        if Platform.FEISHU not in config.platforms:
-            config.platforms[Platform.FEISHU] = PlatformConfig()
-        config.platforms[Platform.FEISHU].enabled = True
-        config.platforms[Platform.FEISHU].extra.update({
+        if Platform.FEISHU.value not in config.platforms:
+            config.platforms[Platform.FEISHU.value] = PlatformConfig()
+        config.platforms[Platform.FEISHU.value].enabled = True
+        config.platforms[Platform.FEISHU.value].extra.update({
             "app_id": feishu_app_id,
             "app_secret": feishu_app_secret,
             "domain": os.getenv("FEISHU_DOMAIN", "feishu"),
@@ -1003,13 +1020,13 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         })
         feishu_encrypt_key = os.getenv("FEISHU_ENCRYPT_KEY", "")
         if feishu_encrypt_key:
-            config.platforms[Platform.FEISHU].extra["encrypt_key"] = feishu_encrypt_key
+            config.platforms[Platform.FEISHU.value].extra["encrypt_key"] = feishu_encrypt_key
         feishu_verification_token = os.getenv("FEISHU_VERIFICATION_TOKEN", "")
         if feishu_verification_token:
-            config.platforms[Platform.FEISHU].extra["verification_token"] = feishu_verification_token
+            config.platforms[Platform.FEISHU.value].extra["verification_token"] = feishu_verification_token
         feishu_home = os.getenv("FEISHU_HOME_CHANNEL")
         if feishu_home:
-            config.platforms[Platform.FEISHU].home_channel = HomeChannel(
+            config.platforms[Platform.FEISHU.value].home_channel = HomeChannel(
                 platform=Platform.FEISHU,
                 chat_id=feishu_home,
                 name=os.getenv("FEISHU_HOME_CHANNEL_NAME", "Home"),
@@ -1019,19 +1036,19 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     wecom_bot_id = os.getenv("WECOM_BOT_ID")
     wecom_secret = os.getenv("WECOM_SECRET")
     if wecom_bot_id and wecom_secret:
-        if Platform.WECOM not in config.platforms:
-            config.platforms[Platform.WECOM] = PlatformConfig()
-        config.platforms[Platform.WECOM].enabled = True
-        config.platforms[Platform.WECOM].extra.update({
+        if Platform.WECOM.value not in config.platforms:
+            config.platforms[Platform.WECOM.value] = PlatformConfig()
+        config.platforms[Platform.WECOM.value].enabled = True
+        config.platforms[Platform.WECOM.value].extra.update({
             "bot_id": wecom_bot_id,
             "secret": wecom_secret,
         })
         wecom_ws_url = os.getenv("WECOM_WEBSOCKET_URL", "")
         if wecom_ws_url:
-            config.platforms[Platform.WECOM].extra["websocket_url"] = wecom_ws_url
+            config.platforms[Platform.WECOM.value].extra["websocket_url"] = wecom_ws_url
         wecom_home = os.getenv("WECOM_HOME_CHANNEL")
         if wecom_home:
-            config.platforms[Platform.WECOM].home_channel = HomeChannel(
+            config.platforms[Platform.WECOM.value].home_channel = HomeChannel(
                 platform=Platform.WECOM,
                 chat_id=wecom_home,
                 name=os.getenv("WECOM_HOME_CHANNEL_NAME", "Home"),
@@ -1041,10 +1058,10 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     wecom_callback_corp_id = os.getenv("WECOM_CALLBACK_CORP_ID")
     wecom_callback_corp_secret = os.getenv("WECOM_CALLBACK_CORP_SECRET")
     if wecom_callback_corp_id and wecom_callback_corp_secret:
-        if Platform.WECOM_CALLBACK not in config.platforms:
-            config.platforms[Platform.WECOM_CALLBACK] = PlatformConfig()
-        config.platforms[Platform.WECOM_CALLBACK].enabled = True
-        config.platforms[Platform.WECOM_CALLBACK].extra.update({
+        if Platform.WECOM_CALLBACK.value not in config.platforms:
+            config.platforms[Platform.WECOM_CALLBACK.value] = PlatformConfig()
+        config.platforms[Platform.WECOM_CALLBACK.value].enabled = True
+        config.platforms[Platform.WECOM_CALLBACK.value].extra.update({
             "corp_id": wecom_callback_corp_id,
             "corp_secret": wecom_callback_corp_secret,
             "agent_id": os.getenv("WECOM_CALLBACK_AGENT_ID", ""),
@@ -1058,12 +1075,12 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     weixin_token = os.getenv("WEIXIN_TOKEN")
     weixin_account_id = os.getenv("WEIXIN_ACCOUNT_ID")
     if weixin_token or weixin_account_id:
-        if Platform.WEIXIN not in config.platforms:
-            config.platforms[Platform.WEIXIN] = PlatformConfig()
-        config.platforms[Platform.WEIXIN].enabled = True
+        if Platform.WEIXIN.value not in config.platforms:
+            config.platforms[Platform.WEIXIN.value] = PlatformConfig()
+        config.platforms[Platform.WEIXIN.value].enabled = True
         if weixin_token:
-            config.platforms[Platform.WEIXIN].token = weixin_token
-        extra = config.platforms[Platform.WEIXIN].extra
+            config.platforms[Platform.WEIXIN.value].token = weixin_token
+        extra = config.platforms[Platform.WEIXIN.value].extra
         if weixin_account_id:
             extra["account_id"] = weixin_account_id
         weixin_base_url = os.getenv("WEIXIN_BASE_URL", "").strip()
@@ -1089,7 +1106,7 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
             extra["split_multiline_messages"] = weixin_split_multiline
         weixin_home = os.getenv("WEIXIN_HOME_CHANNEL", "").strip()
         if weixin_home:
-            config.platforms[Platform.WEIXIN].home_channel = HomeChannel(
+            config.platforms[Platform.WEIXIN.value].home_channel = HomeChannel(
                 platform=Platform.WEIXIN,
                 chat_id=weixin_home,
                 name=os.getenv("WEIXIN_HOME_CHANNEL_NAME", "Home"),
@@ -1099,10 +1116,10 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     bluebubbles_server_url = os.getenv("BLUEBUBBLES_SERVER_URL")
     bluebubbles_password = os.getenv("BLUEBUBBLES_PASSWORD")
     if bluebubbles_server_url and bluebubbles_password:
-        if Platform.BLUEBUBBLES not in config.platforms:
-            config.platforms[Platform.BLUEBUBBLES] = PlatformConfig()
-        config.platforms[Platform.BLUEBUBBLES].enabled = True
-        config.platforms[Platform.BLUEBUBBLES].extra.update({
+        if Platform.BLUEBUBBLES.value not in config.platforms:
+            config.platforms[Platform.BLUEBUBBLES.value] = PlatformConfig()
+        config.platforms[Platform.BLUEBUBBLES.value].enabled = True
+        config.platforms[Platform.BLUEBUBBLES.value].extra.update({
             "server_url": bluebubbles_server_url.rstrip("/"),
             "password": bluebubbles_password,
             "webhook_host": os.getenv("BLUEBUBBLES_WEBHOOK_HOST", "127.0.0.1"),
@@ -1111,8 +1128,8 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
             "send_read_receipts": os.getenv("BLUEBUBBLES_SEND_READ_RECEIPTS", "true").lower() in ("true", "1", "yes"),
         })
     bluebubbles_home = os.getenv("BLUEBUBBLES_HOME_CHANNEL")
-    if bluebubbles_home and Platform.BLUEBUBBLES in config.platforms:
-        config.platforms[Platform.BLUEBUBBLES].home_channel = HomeChannel(
+    if bluebubbles_home and Platform.BLUEBUBBLES.value in config.platforms:
+        config.platforms[Platform.BLUEBUBBLES.value].home_channel = HomeChannel(
             platform=Platform.BLUEBUBBLES,
             chat_id=bluebubbles_home,
             name=os.getenv("BLUEBUBBLES_HOME_CHANNEL_NAME", "Home"),
@@ -1122,10 +1139,10 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
     qq_app_id = os.getenv("QQ_APP_ID")
     qq_client_secret = os.getenv("QQ_CLIENT_SECRET")
     if qq_app_id or qq_client_secret:
-        if Platform.QQBOT not in config.platforms:
-            config.platforms[Platform.QQBOT] = PlatformConfig()
-        config.platforms[Platform.QQBOT].enabled = True
-        extra = config.platforms[Platform.QQBOT].extra
+        if Platform.QQBOT.value not in config.platforms:
+            config.platforms[Platform.QQBOT.value] = PlatformConfig()
+        config.platforms[Platform.QQBOT.value].enabled = True
+        extra = config.platforms[Platform.QQBOT.value].extra
         if qq_app_id:
             extra["app_id"] = qq_app_id
         if qq_client_secret:
@@ -1138,7 +1155,7 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
             extra["group_allow_from"] = qq_group_allowed
         qq_home = os.getenv("QQ_HOME_CHANNEL", "").strip()
         if qq_home:
-            config.platforms[Platform.QQBOT].home_channel = HomeChannel(
+            config.platforms[Platform.QQBOT.value].home_channel = HomeChannel(
                 platform=Platform.QQBOT,
                 chat_id=qq_home,
                 name=os.getenv("QQ_HOME_CHANNEL_NAME", "Home"),

@@ -7,13 +7,30 @@ platforms:
   # WECOM_BOT_ID, WECOM_SECRET, WECOM_DM_POLICY
 
   # Personal WeChat (Weixin iLink Bot)
-  # To enable:
-  #   1. Run the QR login script on the server to get token
-  #   2. Add WEIXIN_ACCOUNT_ID and WEIXIN_TOKEN to ~/.hermes/.env
-  #   3. Uncomment the block below
+  # Each user gets their own suffixed key (weixin, weixin_user1, weixin_user2, ...)
+  # For each instance:
+  #   1. Run the QR login script on the server with the user's WeChat
+  #   2. Put the returned token + account_id directly in the extra block below
   #
+  # Single account (your own):
   # weixin:
   #   enabled: true
+  #   token: "<account_id>:<token_string>"
   #   extra:
+  #     account_id: "<account_id>"
   #     dm_policy: open          # open | allowlist
-  #     allow_from: ""           # comma-separated WeChat user IDs (for allowlist mode)
+  #
+  # Multi-user (one block per paying customer):
+  # weixin_user1:
+  #   enabled: true
+  #   token: "1ce1c36d98b2@im.bot:xxxx"
+  #   extra:
+  #     account_id: "1ce1c36d98b2@im.bot"
+  #     dm_policy: open
+  #
+  # weixin_user2:
+  #   enabled: true
+  #   token: "abcd1234@im.bot:xxxx"
+  #   extra:
+  #     account_id: "abcd1234@im.bot"
+  #     dm_policy: open

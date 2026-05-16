@@ -1830,26 +1830,26 @@ class GatewayRunner:
         startup_retryable_errors: list[str] = []
         
         # Initialize and connect each configured platform
-        for platform, platform_config in self.config.platforms.items():
+        for platform_key, platform_config in self.config.platforms.items():
             if not platform_config.enabled:
                 continue
             enabled_platform_count += 1
-            
-            adapter = self._create_adapter(platform, platform_config)
+
+            adapter = self._create_adapter(platform_key, platform_config)
             if not adapter:
-                logger.warning("No adapter available for %s", platform.value)
+                logger.warning("No adapter available for %s", platform_key)
                 continue
-            
+
             # Set up message + fatal error handlers
             adapter.set_message_handler(self._handle_message)
             adapter.set_fatal_error_handler(self._handle_adapter_fatal_error)
             adapter.set_session_store(self.session_store)
             adapter.set_busy_session_handler(self._handle_active_session_busy_message)
-            
+
             # Try to connect
-            logger.info("Connecting to %s...", platform.value)
+            logger.info("Connecting to %s...", platform_key)
             self._update_platform_runtime_status(
-                platform.value,
+                platform_key,
                 platform_state="connecting",
                 error_code=None,
                 error_message=None,
@@ -1857,11 +1857,11 @@ class GatewayRunner:
             try:
                 success = await adapter.connect()
                 if success:
-                    self.adapters[platform] = adapter
+                    self.adapters[adapter.platform] = adapter
                     self._sync_voice_mode_state_to_adapter(adapter)
                     connected_count += 1
                     self._update_platform_runtime_status(
-                        platform.value,
+                        platform_key,
                         platform_state="connected",
                         error_code=None,
                         error_message=None,
@@ -1871,7 +1871,7 @@ class GatewayRunner:
                     logger.warning("✗ %s failed to connect", platform.value)
                     if adapter.has_fatal_error:
                         self._update_platform_runtime_status(
-                            platform.value,
+                            platform_key,
                             platform_state="retrying" if adapter.fatal_error_retryable else "fatal",
                             error_code=adapter.fatal_error_code,
                             error_message=adapter.fatal_error_message,
@@ -1882,27 +1882,27 @@ class GatewayRunner:
                             else startup_nonretryable_errors
                         )
                         target.append(
-                            f"{platform.value}: {adapter.fatal_error_message}"
+                            f"{platform_key}: {adapter.fatal_error_message}"
                         )
                         # Queue for reconnection if the error is retryable
                         if adapter.fatal_error_retryable:
-                            self._failed_platforms[platform] = {
+                            self._failed_platforms[platform_key] = {
                                 "config": platform_config,
                                 "attempts": 1,
                                 "next_retry": time.monotonic() + 30,
                             }
                     else:
                         self._update_platform_runtime_status(
-                            platform.value,
+                            platform_key,
                             platform_state="retrying",
                             error_code=None,
                             error_message="failed to connect",
                         )
                         startup_retryable_errors.append(
-                            f"{platform.value}: failed to connect"
+                            f"{platform_key}: failed to connect"
                         )
                         # No fatal error info means likely a transient issue — queue for retry
-                        self._failed_platforms[platform] = {
+                        self._failed_platforms[platform_key] = {
                             "config": platform_config,
                             "attempts": 1,
                             "next_retry": time.monotonic() + 30,
@@ -2401,11 +2401,29 @@ class GatewayRunner:
         await self._shutdown_event.wait()
     
     def _create_adapter(
-        self, 
-        platform: Platform, 
+        self,
+        platform_key: str,
         config: Any
     ) -> Optional[BasePlatformAdapter]:
-        """Create the appropriate adapter for a platform."""
+        """Create the appropriate adapter for a platform.
+
+        platform_key may be a plain platform name ("weixin") or a suffixed
+        multi-instance key ("weixin_user1").  The base platform type is
+        resolved by trying the full key first, then the prefix before the
+        first underscore.
+        """
+        # Resolve Platform enum from key (supports "weixin_user1" → Platform.WEIXIN)
+        platform: Optional[Platform] = None
+        try:
+            platform = Platform(platform_key)
+        except ValueError:
+            base = platform_key.split("_")[0]
+            try:
+                platform = Platform(base)
+            except ValueError:
+                logger.warning("Unknown platform key: %s", platform_key)
+                return None
+
         if hasattr(config, "extra") and isinstance(config.extra, dict):
             config.extra.setdefault(
                 "group_sessions_per_user",
