@@ -1866,9 +1866,9 @@ class GatewayRunner:
                         error_code=None,
                         error_message=None,
                     )
-                    logger.info("✓ %s connected", platform.value)
+                    logger.info("✓ %s connected", platform_key)
                 else:
-                    logger.warning("✗ %s failed to connect", platform.value)
+                    logger.warning("✗ %s failed to connect", platform_key)
                     if adapter.has_fatal_error:
                         self._update_platform_runtime_status(
                             platform_key,
@@ -1908,14 +1908,14 @@ class GatewayRunner:
                             "next_retry": time.monotonic() + 30,
                         }
             except Exception as e:
-                logger.error("✗ %s error: %s", platform.value, e)
+                logger.error("✗ %s error: %s", platform_key, e)
                 self._update_platform_runtime_status(
                     platform.value,
                     platform_state="retrying",
                     error_code=None,
                     error_message=str(e),
                 )
-                startup_retryable_errors.append(f"{platform.value}: {e}")
+                startup_retryable_errors.append(f"{platform_key}: {e}")
                 # Unexpected exceptions are typically transient — queue for retry
                 self._failed_platforms[platform] = {
                     "config": platform_config,
