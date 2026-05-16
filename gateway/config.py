@@ -476,6 +476,30 @@ def load_gateway_config() -> GatewayConfig:
         except Exception as e:
             logger.warning("Failed to load %s: %s", gateway_json_path, e)
 
+    # gateway.yaml — multi-instance platform config (e.g. weixin_user1, weixin_user2)
+    # Loaded after gateway.json so it takes precedence over legacy defaults.
+    try:
+        import yaml as _yaml
+        gateway_yaml_path = _home / "gateway.yaml"
+        if gateway_yaml_path.exists():
+            with open(gateway_yaml_path, encoding="utf-8") as f:
+                gw_yaml = _yaml.safe_load(f) or {}
+            gw_platforms = gw_yaml.get("platforms", {})
+            if isinstance(gw_platforms, dict):
+                existing = gw_data.setdefault("platforms", {})
+                for plat_name, plat_block in gw_platforms.items():
+                    if not isinstance(plat_block, dict):
+                        continue
+                    merged_extra = {**existing.get(plat_name, {}).get("extra", {}), **plat_block.get("extra", {})}
+                    merged = {**existing.get(plat_name, {}), **plat_block}
+                    if merged_extra:
+                        merged["extra"] = merged_extra
+                    existing[plat_name] = merged
+                gw_data["platforms"] = existing
+            logger.info("Loaded gateway.yaml with %d platform(s)", len(gw_platforms))
+    except Exception as e:
+        logger.warning("Failed to load gateway.yaml: %s", e)
+
     # Primary source: config.yaml
     try:
         import yaml
